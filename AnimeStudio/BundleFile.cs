@@ -544,66 +544,54 @@ namespace AnimeStudio
                 var blockInfo = m_BlocksInfo[i];
                 var compressionType = (CompressionType)(blockInfo.flags & StorageBlockFlags.CompressionTypeMask);
                 Logger.Verbose($"Block compression type {compressionType}");
-                switch (compressionType) //kStorageBlockCompressionTypeMask
+
+                var cSize = (int)blockInfo.compressedSize;
+                var blockUnit = 65536 + 32;
+                var cBytes = ArrayPool<byte>.Shared.Rent(cSize);
+                reader.Read(cBytes.AsSpan(0, cSize));
+
+                var sha1 = Convert.FromHexString(reader.FileName);
+                using var aes = new AesGcm(sha1, 16);
+
+                using var preBlocksStream = new MemoryStream();
+                int cursor = 0;
+                while (cursor < cSize)
                 {
-                    case CompressionType.None: //None
-                        {
-                            reader.BaseStream.CopyTo(blocksStream, blockInfo.compressedSize);
-                            break;
-                        }
-                    case CompressionType.Lzma: //LZMA
-                        {
-                            var compressedStream = reader.BaseStream;
-                            if (Game.Type.IsNetEase() && i == 0)
-                            {
-                                var compressedBytesSpan = reader.ReadBytes((int)blockInfo.compressedSize).AsSpan();
-                                NetEaseUtils.DecryptWithoutHeader(compressedBytesSpan);
-                                var ms = new MemoryStream(compressedBytesSpan.ToArray());
-                                compressedStream = ms;
-                            }
-                            SevenZipHelper.StreamDecompress(compressedStream, blocksStream, blockInfo.compressedSize, blockInfo.uncompressedSize);
-                            break;
-                        }
-                    case CompressionType.OodleHSR:
-                    case CompressionType.OodleMr0k:
-                        {
-                            // Star Rail v2.7 fix, thanks to Yarik
-                            var compressedSize = (int)blockInfo.compressedSize;
-                            var uncompressedSize = (int)blockInfo.uncompressedSize;
+                    int remain = cSize - cursor;
+                    int curBlockSize = Math.Min(remain, blockUnit);
+                    var span = cBytes.AsSpan(cursor, curBlockSize);
 
-                            var compressedBytes = ArrayPool<byte>.Shared.Rent(compressedSize);
-                            var uncompressedBytes = ArrayPool<byte>.Shared.Rent(uncompressedSize);
+                    var iv = span.Slice(0, 12);
+                    int length = BitConverter.ToInt32(span.Slice(12, 4));
+                    var ciphertext = span.Slice(16, length);
+                    var tag = span.Slice(16 + length, 16);
 
-                            var compressedBytesSpan = compressedBytes.AsSpan(0, compressedSize);
-                            var uncompressedBytesSpan = uncompressedBytes.AsSpan(0, uncompressedSize);
+                    var plain = ArrayPool<byte>.Shared.Rent(length);
+                    aes.Decrypt(iv, ciphertext, tag, plain.AsSpan(0, length));
 
-                            try
-                            {
-                                reader.Read(compressedBytesSpan);
-                                if (compressionType == CompressionType.OodleMr0k && Mr0kUtils.IsMr0k(compressedBytes))
-                                {
-                                    Logger.Verbose($"Block encrypted with mr0k, decrypting...");
-                                    compressedBytesSpan = Mr0kUtils.Decrypt(compressedBytesSpan, (Mr0k)Game);
-                                }
+                    preBlocksStream.Write(plain.AsSpan(0, length));
+                    ArrayPool<byte>.Shared.Return(plain, true);
 
-                                var numWrite = OodleHelper.Decompress(compressedBytesSpan, uncompressedBytesSpan);
-                                if (numWrite != uncompressedSize)
-                                {
-                                    Logger.Warning($"Oodle decompression error, write {numWrite} bytes but expected {uncompressedSize} bytes");
-                                }
-                            }
-                            finally
-                            {
-                                blocksStream.Write(uncompressedBytesSpan);
-                                ArrayPool<byte>.Shared.Return(compressedBytes, true);
-                                ArrayPool<byte>.Shared.Return(uncompressedBytes, true);
-                            }
+                    Logger.Verbose($"block {i}: compressed={blockInfo.compressedSize}, uncompressed={blockInfo.uncompressedSize}, clen={length}");
+                    cursor += curBlockSize;
+                }
 
-                            break;
-                        }
-                    case CompressionType.Lz4: //LZ4
-                    case CompressionType.Lz4HC: //LZ4HC
-                    case CompressionType.Lz4Mr0k when Game.Type.IsMhyGroup(): //Lz4Mr0k
+                ArrayPool<byte>.Shared.Return(cBytes, true);
+                preBlocksStream.Position = 0;
+                blockInfo.compressedSize = (uint)preBlocksStream.Length;
+
+                switch (compressionType)
+                {
+                    case CompressionType.None:
+                        preBlocksStream.CopyTo(blocksStream);
+                        break;
+
+                    case CompressionType.Lzma:
+                        SevenZipHelper.StreamDecompress(preBlocksStream, blocksStream, blockInfo.compressedSize, blockInfo.uncompressedSize);
+                        break;
+
+                    case CompressionType.Lz4:
+                    case CompressionType.Lz4HC:
                         {
                             var compressedSize = (int)blockInfo.compressedSize;
                             var uncompressedSize = (int)blockInfo.uncompressedSize;
@@ -613,208 +601,16 @@ namespace AnimeStudio
 
                             try
                             {
+                                preBlocksStream.Read(compressedBytes, 0, compressedSize);
                                 var compressedBytesSpan = compressedBytes.AsSpan(0, compressedSize);
                                 var uncompressedBytesSpan = uncompressedBytes.AsSpan(0, uncompressedSize);
 
-                                reader.Read(compressedBytesSpan);
-
-                                if (Game.Type.IsGGZ_117())
-                                {
-                                    var cipher = Aes.Create();
-                                    cipher.Key = "LPC@a*&^b19b61l/"u8.ToArray();
-                                    var dec = cipher.DecryptCbc(compressedBytesSpan, new byte[16]);
-                                    compressedBytesSpan = compressedBytesSpan[..dec.Length];
-                                    dec.CopyTo(compressedBytesSpan);
-                                }
-
-                                if (Game.Type.IsGGZ_124())
-                                {
-                                    var cipher = Aes.Create();
-                                    cipher.Key = new byte[16] { 0x72, 0xe6, 0x5d, 0xac, 0xa5, 0xb7, 0x9b, 0x2a, 0x42, 0x8e, 0x7f, 0x64, 0xc1, 0xa4, 0x0a, 0x9e };
-                                    var tmp = compressedBytesSpan.Slice(compressedBytesSpan.Length - 16, 16).ToArray();
-                                    byte[] ivKey = new byte[16] { 0x8C, 0xA1, 0x89, 0xD, 0xBF, 0xE6, 0x42, 0x68, 0x41, 0x99, 0x2D, 0xF, 0xB0, 0x54, 0xBB, 0x16 };
-                                    byte[] iv = new byte[16];
-                                    for (int j = 0; j < 16; j++)
-                                    {
-                                        iv[j] = (byte)(tmp[j] ^ ivKey[j]);
-                                    }
-                                    compressedBytesSpan = compressedBytesSpan.Slice(0, compressedBytesSpan.Length - 16);
-                                    var dec = cipher.DecryptCbc(compressedBytesSpan, iv);
-                                    compressedBytesSpan = compressedBytesSpan[..dec.Length];
-                                    dec.CopyTo(compressedBytesSpan);
-                                }
-
-                                if (Game.Type.IsHNACB1())
-                                {
-                                    if (i == 0)
-                                    {
-                                        // if first block, decrypt
-                                        WmvUtils.Decrypt(compressedBytesSpan);
-                                    }
-                                    else
-                                    {
-                                        // else, xor with first one
-                                        for (int j = 0; j < compressedBytesSpan.Length; j++)
-                                        {
-                                            compressedBytesSpan[j] ^= firstBlockSpan[j % firstBlockSpan.Length];
-                                        }
-                                    }
-                                }
-                                
-                                if (compressionType == CompressionType.Lz4Mr0k && Mr0kUtils.IsMr0k(compressedBytes))
-                                {
-                                    Logger.Verbose($"Block encrypted with mr0k, decrypting...");
-                                    compressedBytesSpan = Mr0kUtils.Decrypt(compressedBytesSpan, (Mr0k)Game);
-                                }
-                                if (Game.IsUnityCN() && ((int)blockInfo.flags & 0x100) != 0)
-                                {
-                                    Logger.Verbose($"Decrypting block with UnityCN...");
-                                    UnityCN.DecryptBlock(compressedBytes, compressedSize, i);
-                                }
-                                if (Game.Type.IsNetEase() && i == 0)
-                                {
-                                    NetEaseUtils.DecryptWithHeader(compressedBytesSpan);
-                                }
-                                if (Game.Type.IsArknightsEndfield() && i == 0 && compressedBytesSpan[..32].Count((byte)0xa6) > 5)
-                                {
-                                    FairGuardUtils.Decrypt(compressedBytesSpan);
-                                }
-                                if (Game.Type.IsOPFP())
-                                {
-                                    OPFPUtils.Decrypt(compressedBytesSpan, reader.FullPath);
-                                }
                                 var numWrite = LZ4.Instance.Decompress(compressedBytesSpan, uncompressedBytesSpan);
                                 if (numWrite != uncompressedSize)
                                 {
                                     throw new IOException($"Lz4 decompression error, write {numWrite} bytes but expected {uncompressedSize} bytes");
                                 }
 
-                                if (Game.Type.IsHNACB1() && i == 0)
-                                {
-                                    firstBlockBytes = ArrayPool<byte>.Shared.Rent(uncompressedSize);
-                                    firstBlockSpan = firstBlockBytes.AsSpan(0, uncompressedSize);
-                                    uncompressedBytesSpan.CopyTo(firstBlockSpan);
-                                }
-
-                                blocksStream.Write(uncompressedBytesSpan);
-                            }
-                            finally
-                            {
-                                ArrayPool<byte>.Shared.Return(compressedBytes, true);
-                                ArrayPool<byte>.Shared.Return(uncompressedBytes, true);
-                            }
-                            break;
-                        }
-                    case CompressionType.Lz4Inv when Game.Type.IsArknightsEndfield():
-                        {
-                            var compressedSize = (int)blockInfo.compressedSize;
-                            var uncompressedSize = (int)blockInfo.uncompressedSize;
-
-                            var compressedBytes = ArrayPool<byte>.Shared.Rent(compressedSize);
-                            var uncompressedBytes = ArrayPool<byte>.Shared.Rent(uncompressedSize);
-
-                            var compressedBytesSpan = compressedBytes.AsSpan(0, compressedSize);
-                            var uncompressedBytesSpan = uncompressedBytes.AsSpan(0, uncompressedSize);
-
-                            try
-                            {
-                                reader.Read(compressedBytesSpan);
-                                if (i == 0 && compressedBytesSpan[..32].Count((byte)0xa6) > 5)
-                                {
-                                    FairGuardUtils.Decrypt(compressedBytesSpan);
-                                }
-
-                                var numWrite = LZ4Inv.Instance.Decompress(compressedBytesSpan, uncompressedBytesSpan);
-                                if (numWrite != uncompressedSize)
-                                {
-                                    throw new IOException($"Lz4 decompression error, write {numWrite} bytes but expected {uncompressedSize} bytes");
-                                }
-                                blocksStream.Write(uncompressedBytesSpan);
-                            }
-                            finally
-                            {
-                                ArrayPool<byte>.Shared.Return(compressedBytes, true);
-                                ArrayPool<byte>.Shared.Return(uncompressedBytes, true);
-                            }
-                            break;
-                        }
-                    case CompressionType.Lz4Lit4 or CompressionType.Lz4Lit5 when Game.Type.IsExAstris():
-                        {
-                            var compressedSize = (int)blockInfo.compressedSize;
-                            var uncompressedSize = (int)blockInfo.uncompressedSize;
-
-                            var compressedBytes = ArrayPool<byte>.Shared.Rent(compressedSize);
-                            var uncompressedBytes = ArrayPool<byte>.Shared.Rent(uncompressedSize);
-
-                            var compressedBytesSpan = compressedBytes.AsSpan(0, compressedSize);
-                            var uncompressedBytesSpan = uncompressedBytes.AsSpan(0, uncompressedSize);
-
-                            try
-                            {
-                                reader.Read(compressedBytesSpan);
-                                var numWrite = LZ4Lit.Instance.Decompress(compressedBytesSpan, uncompressedBytesSpan);
-                                if (numWrite != uncompressedSize)
-                                {
-                                    throw new IOException($"Lz4 decompression error, write {numWrite} bytes but expected {uncompressedSize} bytes");
-                                }
-                                blocksStream.Write(uncompressedBytesSpan);
-                            }
-                            finally
-                            {
-                                ArrayPool<byte>.Shared.Return(compressedBytes, true);
-                                ArrayPool<byte>.Shared.Return(uncompressedBytes, true);
-                            }
-                            break;
-                        }
-                    case CompressionType.Zstd when !Game.Type.IsMhyGroup(): //Zstd
-                        {
-                            var compressedSize = (int)blockInfo.compressedSize;
-                            var uncompressedSize = (int)blockInfo.uncompressedSize;
-
-                            var compressedBytes = ArrayPool<byte>.Shared.Rent(compressedSize);
-                            var uncompressedBytes = ArrayPool<byte>.Shared.Rent(uncompressedSize);
-
-                            try
-                            {
-                                reader.Read(compressedBytes, 0, compressedSize);
-                                using var decompressor = new Decompressor();
-                                var numWrite = decompressor.Unwrap(compressedBytes, 0, compressedSize, uncompressedBytes, 0, uncompressedSize);
-                                if (numWrite != uncompressedSize)
-                                {
-                                    throw new IOException($"Zstd decompression error, write {numWrite} bytes but expected {uncompressedSize} bytes");
-                                }
-                                blocksStream.Write(uncompressedBytes.ToArray(), 0, uncompressedSize);
-                            }
-                            catch (Exception ex)
-                            {
-                                Console.WriteLine($"Zstd decompression error:\n{ex}");
-                            }
-                            finally
-                            {
-                                ArrayPool<byte>.Shared.Return(compressedBytes, true);
-                                ArrayPool<byte>.Shared.Return(uncompressedBytes, true);
-                            }
-                            break;
-                        }
-                    case CompressionType.Lz4Lit4 or CompressionType.Lz4Lit5 when Game.Type.IsArknights():
-                        {
-                            var compressedSize = (int)blockInfo.compressedSize;
-                            var uncompressedSize = (int)blockInfo.uncompressedSize;
-
-                            var compressedBytes = ArrayPool<byte>.Shared.Rent(compressedSize);
-                            var uncompressedBytes = ArrayPool<byte>.Shared.Rent(uncompressedSize);
-
-                            var compressedBytesSpan = compressedBytes.AsSpan(0, compressedSize);
-                            var uncompressedBytesSpan = uncompressedBytes.AsSpan(0, uncompressedSize);
-
-                            try
-                            {
-                                reader.Read(compressedBytesSpan);
-                                var numWrite = LZ4Ak.Instance.Decompress(compressedBytesSpan, uncompressedBytesSpan);
-                                if (numWrite != uncompressedSize)
-                                {
-                                    throw new IOException($"Lz4 decompression error, write {numWrite} bytes but expected {uncompressedSize} bytes");
-                                }
                                 blocksStream.Write(uncompressedBytesSpan);
                             }
                             finally

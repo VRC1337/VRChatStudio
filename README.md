@@ -1,49 +1,39 @@
-# Anime Studio
-## Asset exploration tool for hoyo games and more !
+# VRChat Studio
 
-![image](https://github.com/user-attachments/assets/173757f6-8dce-48fc-9525-821bb1244280)
+A tool for decrypting VRChat cache files.
 
----
+## How to Use
 
-# How do I use this ?
+1. Calculate a 256-bit AES key and encode it in hexadecimal format
 
-You should look at the [official wiki](https://github.com/Escartem/AnimeStudio/wiki), if required look at the [original tutorial by Modder4869](https://gist.github.com/Modder4869/0f5371f8879607eb95b8e63badca227e) or the [original readme](https://github.com/RazTools/Studio/blob/main/README.md). Otherwise [join the discord](https://discord.gg/fzRdtVh) and ask there !
+2. Rename the file you wish to decrypt to this encoded result
 
----
+3. Use this tool to load the file for decryption and extraction
 
-# How do I download this ?
+Example:
 
-## [Download Studio for .NET 9 (recommended ✨)](https://nightly.link/Escartem/AnimeStudio/workflows/build/master/AnimeStudio-net9.zip) or [Download Studio for .NET 8](https://nightly.link/Escartem/AnimeStudio/workflows/build/master/AnimeStudio-net8.zip)
+`__data` → `8eff42f4db976b62c027fce0f251ecb5e25b18f98ab3ecef55e27b563eb9d92a`
 
----
+## For VRCW Files
 
-# What is this ?
+Use the `id` to calculate the key:
 
-It's an up-to-date fork of Razmoth's one. After his repo was discontinued, bugs started to arise as games evolved, and people started making forks to fix some of them, but each one would not support the fixes by the others and so on. This version aims at being the new start base for AssetStudio, renamed as AnimeStudio, it supports all 3 main hoyo games, and is open to any contribution !
+```
+SHA256.HashData(Encoding.UTF8.GetBytes("wrld_7e10376a-29b6-43af-ac5d-6eb72732e90c" + "-MKEf6MXxgp5zN4YZkSdoj3oVygj6rLDTLXk6BQHnpyCRdv6R7d8Hm4nGs6LwQ9Ce"));
+```
 
----
+## VRCA
 
-# What changed ?
+Use the `encryptionKey` to calculate the key:
 
-This is a non-exhaustive list of modifications :
-- Removed usage of a [certain dll for a certain decryption](https://github.com/Escartem/AnimeStudio/commit/1fcfa9041e07cd0a98b4d23f1578e910256fa1f8) 👀
-- Merged fixes for Genshin, Star Rail and ZZZ suport with improvements
-- Dark mode
-- Reorganised menu bar for easier usage
-- Addes SHA256 hash for assets
-- New game selector merged with UnityCN keys list and updated UnityCN keys manager
-- Asset Browser improvements
-    - It is now possible to use json files instead of only message pack
-    - You can now relocate the sources files of a map instead of having to build a new one to adjust them, making maps no longer game install dir dependant
-    - Only selected assets are displayed in the main window when loading instead of the full blocks
-    - You can load 2 asset maps at once and view the difference between both
+```
+Convert.FromBase64String("jv9C9NuXa2LAJ/zg8lHsteJbGPmKs+zvVeJ7Vj652So=")
+```
+
+| ⚠️ This tool does not provide methods for extracting the `encryptionKey`.
 
 ---
 
 Special thanks to:
-- [hrothgar](https://github.com/hrothgar234567): Help in ZZZ fixes & some dll RE
-- Razmoth: Original AssetStudio for anime games support - [[project](https://github.com/RazTools/Studio)]
-- hashblen: ZZZ fixes fork - [[project](https://github.com/hashblen/ZZZ_Studio)]
-- yarik0chka: Genshin and Star Rail fixes fork - [[project](https://github.com/yarik0chka/YarikStudio)]
-- Perfare: The real original AssetStudio - [[project](https://github.com/perfare/AssetStudio)]
-- All of the others contributor of Razmoth's Studio
+- Perfare: [[AssetStudio](https://github.com/perfare/AssetStudio)]
+- Escartem: [[AnimeStudio](https://github.com/Escartem/AnimeStudio)]
