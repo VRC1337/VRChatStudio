@@ -1,6 +1,6 @@
 # VRChat Studio
 
-A tool for decrypting VRChat cache files.
+This project is specifically designed for decrypting VRChat cache files, forked from [Escartem/AnimeStudio](https://github.com/Escartem/AnimeStudio).
 
 ## How to Use
 
@@ -35,5 +35,5 @@ Convert.FromBase64String("jv9C9NuXa2LAJ/zg8lHsteJbGPmKs+zvVeJ7Vj652So=")
 ---
 
 Special thanks to:
-- Perfare: [[AssetStudio](https://github.com/perfare/AssetStudio)]
-- Escartem: [[AnimeStudio](https://github.com/Escartem/AnimeStudio)]
+- Perfare: [AssetStudio](https://github.com/perfare/AssetStudio)
+- Escartem: [AnimeStudio](https://github.com/Escartem/AnimeStudio)
