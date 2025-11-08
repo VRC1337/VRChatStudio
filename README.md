@@ -22,7 +22,7 @@ Use the `id` to calculate the key:
 SHA256.HashData(Encoding.UTF8.GetBytes("wrld_7e10376a-29b6-43af-ac5d-6eb72732e90c" + "-MKEf6MXxgp5zN4YZkSdoj3oVygj6rLDTLXk6BQHnpyCRdv6R7d8Hm4nGs6LwQ9Ce"));
 ```
 
-## VRCA
+## For VRCA Files
 
 Use the `encryptionKey` to calculate the key:
 
